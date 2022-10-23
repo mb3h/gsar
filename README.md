@@ -40,3 +40,8 @@ TODO
 - [ ] GTK+4.0 support.
 
 PENDING
+
+
+## Notes
+
+README Updated on:2022-10-23

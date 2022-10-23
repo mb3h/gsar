@@ -11,6 +11,13 @@
 #define DY     6
 #define WIDTH  276
 #define HEIGHT 48
+#define GRID_X 12
+#define GRID_Y 12
+#define  BKGND_RGB RGB(0,0,0)
+#define   GRID_RGB RGB(0,128,64)
+#define IOWAIT_RGB YELLOW
+#define SYSTEM_RGB RED
+#define  TOTAL_RGB GREEN
 
 #include "common/pixel.h"
 struct gtk2_helper;
@@ -44,11 +51,15 @@ typedef struct lock lock_s;
 #include <stdlib.h> // fprintf
 #include <ctype.h> // isdigit
 
-typedef uint32_t u32;
+typedef uint32_t u32, u24;
 typedef  uint8_t u8;
 typedef uint16_t u16;
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
+#define RGB(r, g, b) (u24)(r << 16 | g << 8 | b)
+#define RED    RGB(255,0,0)
+#define GREEN  RGB(0,255,0)
+#define YELLOW RGB(255,255,0)
 ///////////////////////////////////////////////////////////////
 // CPU data layout
 
@@ -143,7 +154,7 @@ fprintf (stderr, "%s: error: unexpected 'cpu%d'" "\n", STAT, cpu.num -1);
 }
 
 ///////////////////////////////////////////////////////////////
-// data layout
+// control layout
 
 typedef struct gsar_ {
 	cpu_load_s *prev;
@@ -153,6 +164,11 @@ typedef struct gsar_ {
 #if 0
 	lock_s rawdata_lock;
 #endif
+	u24 total_cl;
+	u24 system_cl;
+	u24 iowait_cl;
+	u16 width;
+	u16 height;
 	u8 max_cpu;
 	u8 mag;
 	bool is_got_prev;
@@ -170,7 +186,15 @@ BUG(0 == quark_app_model)
 		quark_app_model = g_quark_from_static_string ("app-model");
 ASSERTE(0 < quark_app_model)
 BUG(GTK_IS_DRAWING_AREA(da))
+gpointer old;
+	old = g_object_get_qdata (G_OBJECT(da), quark_app_model);
 	g_object_set_qdata (G_OBJECT(da), quark_app_model, (gpointer)m_);
+	if (old == (gpointer)m_)
+		return;
+	gtk_widget_set_size_request (GTK_WIDGET(da)
+		, DX * 2 +               m_->width  * m_->mag
+		, DY * 3 + m_->max_cpu * m_->height * m_->mag 
+		);
 }
 
 static gsar_s *_get_control (GtkWidget *da)
@@ -215,19 +239,44 @@ unsigned n;
 _lock_cleanup()
 }
 
+static void gsar_ctor (gsar_s *m_, unsigned cb, u16 width, u16 height, u8 max_cpu, u8 mag)
+{
+ASSERT2(sizeof(gsar_s) <= cb, " %d <= " VTRR "%d" VTO, (unsigned)sizeof(gsar_s), cb)
+	memset (m_, 0, sizeof(*m_));
+	m_->width   = width;
+	m_->height  = height;
+	m_->max_cpu = max_cpu;
+	m_->mag     = mag;
+	m_->prev       = (cpu_load_s *)malloc (sizeof(cpu_load_s) * max_cpu);
+	m_->delta_prev = (cpu_load_s *)malloc (sizeof(cpu_load_s) * max_cpu);
+	m_->grid       = (bmp_grid_s *)malloc (sizeof(bmp_grid_s) * max_cpu);
+	m_->magdata    = (u8 **)malloc (sizeof(u8 *) * max_cpu);
+unsigned cb_mag;
+	cb_mag = bmp_magnify (NULL, 24, width, height, mag, NULL, 0);
+unsigned n;
+	for (n = 0; n < max_cpu; ++n) {
+		bmp_grid_ctor (&m_->grid[n], sizeof(m_->grid[n]), width, height);
+		bmp_grid_set_grid (&m_->grid[n], GRID_X, GRID_Y);
+		bmp_grid_set_color (&m_->grid[n], GRID_RGB, BKGND_RGB);
+		bmp_grid_erase (&m_->grid[n], 0, 0, 0, 0);
+		m_->magdata[n] = (u8 *)malloc (cb_mag);
+	}
+_lock_warmup()
+}
+
 ///////////////////////////////////////////////////////////////
 // graph running
 
 static void gsar_upload_data (gsar_s *m_, GtkDrawingArea *da)
 {
 unsigned cb_mag;
-	cb_mag = bmp_magnify (NULL, 24, WIDTH, HEIGHT, m_->mag, NULL, 0);
+	cb_mag = bmp_magnify (NULL, 24, m_->width, m_->height, m_->mag, NULL, 0);
 
 unsigned n;
 	for (n = 0; n < m_->max_cpu; ++n) {
 const u8 *rawdata;
 		rawdata = bmp_grid_get (&m_->grid[n], PF_RGB888);
-		bmp_magnify (rawdata, 24, WIDTH, HEIGHT, m_->mag, m_->magdata[n], cb_mag);
+		bmp_magnify (rawdata, 24, m_->width, m_->height, m_->mag, m_->magdata[n], cb_mag);
 	}
 
 gtk2_helper_s gh_this_;
@@ -237,8 +286,8 @@ struct gtk_helper_i *gh;
 _lock()
 u16 y;
 	for (y = DY, n = 0; n < m_->max_cpu; ++n) {
-		gh->paint_data (&gh_this_, DX, y, WIDTH * m_->mag, HEIGHT * m_->mag, PF_RGB888, m_->magdata[n]);
-		y += DY + HEIGHT * m_->mag;
+		gh->paint_data (&gh_this_, DX, y, m_->width * m_->mag, m_->height * m_->mag, PF_RGB888, m_->magdata[n]);
+		y += DY + m_->height * m_->mag;
 	}
 _unlock()
 	gtk2_helper_release (&gh_this_);
@@ -271,29 +320,29 @@ _unlock()
 	for (i = 0; i < max_cpu; ++i) {
 		if (! (0 < delta[i].total))
 			continue;
-cpu_load_s *p, *q; int green, yellow, red;
+cpu_load_s *p, *q; int y_total, y_iowait, y_system;
 		p = &delta[i], q = &m_->delta_prev[i];
-		yellow = HEIGHT * (int)(p->total - (p->iowait + p->sys)) / p->total;
-		red    = HEIGHT * (int)(p->total - p->sys) / p->total;
-		green  = HEIGHT * (int)p->idle / p->total;
+		y_iowait = m_->height * (int)(p->total - (p->iowait + p->sys)) / p->total;
+		y_system = m_->height * (int)(p->total - p->sys) / p->total;
+		y_total  = m_->height * (int)p->idle / p->total;
 u16 dx, sx;
-		dx = WIDTH -1, sx = WIDTH -1 - SCROLL_PER_REDRAW;
+		dx = m_->width -1, sx = m_->width -1 - SCROLL_PER_REDRAW;
 		if (! (0 < m_->delta_prev[i].total)) {
 _lock()
-			bmp_grid_pset (&m_->grid[i], dx, yellow, 0xffff00); // RGB(255,255,0)
-			bmp_grid_pset (&m_->grid[i], dx, red   , 0xff0000); // RGB(255,0,0)
-			bmp_grid_pset (&m_->grid[i], dx, green , 0x00ff00); // RGB(0,255,0)
+			bmp_grid_pset (&m_->grid[i], dx, y_iowait, IOWAIT_RGB);
+			bmp_grid_pset (&m_->grid[i], dx, y_system, SYSTEM_RGB);
+			bmp_grid_pset (&m_->grid[i], dx, y_total ,  TOTAL_RGB);
 _unlock()
 		}
 		else {
-int green0, yellow0, red0;
-			yellow0 = HEIGHT * (int)(q->total - (q->iowait + q->sys)) / q->total;
-			red0    = HEIGHT * (int)(q->total - q->sys) / q->total;
-			green0  = HEIGHT * (int)q->idle / q->total;
+int y_total0, y_iowait0, y_system0;
+			y_iowait0 = m_->height * (int)(q->total - (q->iowait + q->sys)) / q->total;
+			y_system0 = m_->height * (int)(q->total - q->sys) / q->total;
+			y_total0  = m_->height * (int)q->idle / q->total;
 _lock()
-			bmp_grid_line (&m_->grid[i], sx, yellow0, dx, yellow, 0xffff00); // RGB(255,255,0)
-			bmp_grid_line (&m_->grid[i], sx, red0   , dx, red   , 0xff0000); // RGB(255,0,0)
-			bmp_grid_line (&m_->grid[i], sx, green0 , dx, green , 0x00ff00); // RGB(0,255,0)
+			bmp_grid_line (&m_->grid[i], sx, y_iowait0, dx, y_iowait, IOWAIT_RGB);
+			bmp_grid_line (&m_->grid[i], sx, y_system0, dx, y_system, SYSTEM_RGB);
+			bmp_grid_line (&m_->grid[i], sx, y_total0 , dx, y_total ,  TOTAL_RGB);
 _unlock()
 		}
 	}
@@ -306,8 +355,8 @@ static void gsar_kick_redraw (gsar_s *m_, GtkDrawingArea *da)
 {
 unsigned y, n;
 	for (y = DY, n = 0; n < m_->max_cpu; ++n) {
-		gtk_widget_queue_draw_area (GTK_WIDGET(da), DX, y, WIDTH * m_->mag, HEIGHT * m_->mag);
-		y += DY + HEIGHT * m_->mag;
+		gtk_widget_queue_draw_area (GTK_WIDGET(da), DX, y, m_->width * m_->mag, m_->height * m_->mag);
+		y += DY + m_->height * m_->mag;
 	}
 }
 
@@ -379,31 +428,17 @@ unsigned i;
 
 int main (int argc, char *argv[])
 {
-unsigned max_cpu; cpu_load_s dummy[MAX_CPU];
+unsigned cpu_count; cpu_load_s dummy[MAX_CPU];
 	memset (dummy, 0, sizeof(dummy));
-	max_cpu = cpu_load_get (MAX_CPU, dummy);
+	cpu_count = cpu_load_get (MAX_CPU, dummy);
 
 int cmdc; char **cmdv;
 	cmdv = (char **)alloca (argc * sizeof(char *));
 options_s opts;
 	cmdc = parse_cmdline (&opts, argc, argv, cmdv);
 
-gsar_s this_, *m_ = &this_;
-	memset (m_, 0, sizeof(*m_));
-	m_->max_cpu = max_cpu;
-	m_->prev       = (cpu_load_s *)malloc (sizeof(cpu_load_s) * max_cpu);
-	m_->delta_prev = (cpu_load_s *)malloc (sizeof(cpu_load_s) * max_cpu);
-	m_->grid       = (bmp_grid_s *)malloc (sizeof(bmp_grid_s) * max_cpu);
-	m_->magdata    = (u8 **)malloc (sizeof(u8 *) * max_cpu);
-unsigned cb_mag;
-	cb_mag = bmp_magnify (NULL, 24, WIDTH, HEIGHT, opts.mag, NULL, 0);
-unsigned n;
-	for (n = 0; n < max_cpu; ++n) {
-		bmp_grid_ctor (&m_->grid[n], sizeof(m_->grid[n]), WIDTH, HEIGHT);
-		m_->magdata[n] = (u8 *)malloc (cb_mag);
-	}
-	m_->mag = opts.mag;
-_lock_warmup()
+gsar_s this_;
+	gsar_ctor (&this_, sizeof(this_), WIDTH, HEIGHT, cpu_count, opts.mag);
 
 	gtk_init (&cmdc, &cmdv);
 GtkWindow *appframe;
@@ -418,14 +453,7 @@ ASSERTE(GTK_IS_DRAWING_AREA(da))
 	gtk_widget_show (da);
 	gtk_container_add (GTK_CONTAINER(appframe), da);
 
-GtkWidget *da_;
-	da_ = DRAWING_AREA(GTK_WIDGET(appframe));
-	gtk_widget_set_size_request (GTK_WIDGET(da_)
-		, DX * 2 +           WIDTH  * m_->mag
-		, DY * 3 + max_cpu * HEIGHT * m_->mag 
-		);
-
-	_set_control (m_, da);
+	_set_control (&this_, da);
 	gdk_threads_add_timeout (REDRAW_INTERVAL_MS, _on_timer, (gpointer)da);
 
 	gtk_widget_show_all (GTK_WIDGET(appframe));
