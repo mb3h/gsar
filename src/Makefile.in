@@ -101,7 +101,7 @@ am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
 am_gsar_OBJECTS = main.$(OBJEXT) bmp_grid.$(OBJEXT) \
 	gtk2_helper.$(OBJEXT) bmp_helper.$(OBJEXT) lock.$(OBJEXT) \
-	portab.$(OBJEXT)
+	portab.$(OBJEXT) conf.$(OBJEXT)
 gsar_OBJECTS = $(am_gsar_OBJECTS)
 gsar_DEPENDENCIES =
 AM_V_P = $(am__v_P_@AM_V@)
@@ -120,8 +120,9 @@ DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
 am__depfiles_remade = ./$(DEPDIR)/bmp_grid.Po \
-	./$(DEPDIR)/bmp_helper.Po ./$(DEPDIR)/gtk2_helper.Po \
-	./$(DEPDIR)/lock.Po ./$(DEPDIR)/main.Po ./$(DEPDIR)/portab.Po
+	./$(DEPDIR)/bmp_helper.Po ./$(DEPDIR)/conf.Po \
+	./$(DEPDIR)/gtk2_helper.Po ./$(DEPDIR)/lock.Po \
+	./$(DEPDIR)/main.Po ./$(DEPDIR)/portab.Po
 am__mv = mv -f
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
@@ -262,7 +263,8 @@ top_srcdir = @top_srcdir@
 AM_CPPFLAGS = -x c -std=c99 -Wno-deprecated-declarations @GTK_CFLAGS@
 gsar_LDADD = @GTK_LIBS@
 gsar_SOURCES = \
-	main.c bmp_grid.c gtk2_helper.c bmp_helper.c lock.c portab.c
+	main.c bmp_grid.c gtk2_helper.c bmp_helper.c lock.c portab.c conf.c \
+	       bmp_grid.h gtk2_helper.h bmp_helper.h lock.h portab.h conf.h
 
 all: all-am
 
@@ -352,6 +354,7 @@ distclean-compile:
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/bmp_grid.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/bmp_helper.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/conf.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/gtk2_helper.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/lock.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/main.Po@am__quote@ # am--include-marker
@@ -508,6 +511,7 @@ clean-am: clean-binPROGRAMS clean-generic mostlyclean-am
 distclean: distclean-am
 		-rm -f ./$(DEPDIR)/bmp_grid.Po
 	-rm -f ./$(DEPDIR)/bmp_helper.Po
+	-rm -f ./$(DEPDIR)/conf.Po
 	-rm -f ./$(DEPDIR)/gtk2_helper.Po
 	-rm -f ./$(DEPDIR)/lock.Po
 	-rm -f ./$(DEPDIR)/main.Po
@@ -559,6 +563,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 		-rm -f ./$(DEPDIR)/bmp_grid.Po
 	-rm -f ./$(DEPDIR)/bmp_helper.Po
+	-rm -f ./$(DEPDIR)/conf.Po
 	-rm -f ./$(DEPDIR)/gtk2_helper.Po
 	-rm -f ./$(DEPDIR)/lock.Po
 	-rm -f ./$(DEPDIR)/main.Po

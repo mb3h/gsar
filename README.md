@@ -34,7 +34,7 @@ gsar [-m <magnify-scale>]
 
 TODO
 - [ ] display CPU tag label per graph.
-- [ ] don't forget window position on each boot.
+- [x] don't forget window position on each boot.
 - [ ] append option which set monitor interval.
 - [ ] GTK+3.0 support.
 - [ ] GTK+4.0 support.
@@ -44,4 +44,4 @@ PENDING
 
 ## Notes
 
-README Updated on:2022-10-23
+README Updated on:2022-10-30

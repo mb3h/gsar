@@ -43,6 +43,11 @@ typedef struct lock lock_s;
 #define _lock()
 #define _unlock()
 #endif
+#include "conf.h"
+#define CFG_LEFT "left"
+#define CFG_TOP  "top"
+#define DEFAULT_LEFT 0
+#define DEFAULT_TOP  0
 
 #include "vt100.h"
 #include "assert.h"
@@ -361,15 +366,88 @@ unsigned y, n;
 }
 
 ///////////////////////////////////////////////////////////////
-// GTK+ event handler
+// application (data)
+
+typedef struct app_ {
+	struct config *cfg_this_;
+	void (*on_finally)(struct app_ *m_, void *aux);
+	void *on_finally_aux;
+	int x, y;
+} app_s;
+
+static app_s *app_get_instance ()
+{
+static app_s s_app = {0};
+	return &s_app;
+}
+static void app_set_config (app_s *m_, struct config *this_)
+{
+BUG(m_)
+	m_->cfg_this_ = this_;
+}
+
+static struct config *app_get_config (app_s *m_)
+{
+BUG(m_)
+	return m_->cfg_this_;
+}
+
+static void app_set_position (app_s *m_, int x, int y)
+{
+BUG(m_)
+	m_->x = x;
+	m_->y = y;
+}
+
+static void app_get_position (app_s *m_, int *x, int *y)
+{
+BUG(m_)
+	if (x) *x = m_->x;
+	if (y) *y = m_->y;
+}
+
+static void app_set_finally (app_s *m_, void (*callback)(app_s *m_, void *aux), void *aux)
+{
+BUG(m_)
+	m_->on_finally     = callback;
+	m_->on_finally_aux = aux;
+}
+
+static void app_call_finally (app_s *m_)
+{
+	if (m_->on_finally)
+		m_->on_finally (m_, m_->on_finally_aux);
+}
+
+///////////////////////////////////////////////////////////////
+// application (GTK+ event handler)
+
+// GDK_CONFIGURE(13)
+static void _on_configure (GtkWidget *appframe, GdkEventConfigure *event, gpointer user_data)
+{
+BUG(GTK_IS_WINDOW(appframe))
+gint x, y;
+	x = y = 0; // safety
+	gtk_window_get_position (GTK_WINDOW(appframe), &x, &y);
+app_s *m_
+	= app_get_instance ();
+	app_set_position (m_, (int)x, (int)y);
+}
 
 // GDK_DESTROY(1)
-static void _on_destroy (GtkObject *object, gpointer data)
+static void _on_destroy (GtkWidget *appframe, gpointer user_data)
 {
-BUG(GTK_IS_DRAWING_AREA(data))
-gsar_s *m_;
-	m_ = _get_control (GTK_WIDGET(data));
-	gsar_dtor (m_);
+BUG(GTK_IS_DRAWING_AREA(user_data))
+GtkWidget *da;
+	da = GTK_WIDGET(user_data);
+
+app_s *m_
+	= app_get_instance ();
+	app_call_finally (m_);
+
+gsar_s *gsar;
+	gsar = _get_control (da);
+	gsar_dtor (gsar);
 
 	gtk_main_quit ();
 }
@@ -397,6 +475,7 @@ gsar_s *m_;
 }
 
 ///////////////////////////////////////////////////////////////
+// application (primary thread)
 
 static void print_usage ()
 {
@@ -426,6 +505,18 @@ unsigned i;
 	return cmdc;
 }
 
+static void _on_exit (app_s *m_, void *user_data)
+{
+int x, y;
+	app_get_position (m_, &x, &y);
+
+struct config_access_i *cfg; struct config *cfg_this_;
+	cfg = config_query_config_access_i (cfg_this_ = config_get_singlton ());
+	cfg->set_u (cfg_this_, CFG_LEFT, x);
+	cfg->set_u (cfg_this_, CFG_TOP , y);
+	cfg->commit (cfg_this_);
+}
+
 int main (int argc, char *argv[])
 {
 unsigned cpu_count; cpu_load_s dummy[MAX_CPU];
@@ -437,27 +528,43 @@ int cmdc; char **cmdv;
 options_s opts;
 	cmdc = parse_cmdline (&opts, argc, argv, cmdv);
 
-gsar_s this_;
-	gsar_ctor (&this_, sizeof(this_), WIDTH, HEIGHT, cpu_count, opts.mag);
+	config_warmup ();
+struct config_access_i *cfg; struct config *cfg_this_;
+	cfg = config_query_config_access_i (cfg_this_ = config_get_singlton ());
+u16 conf_left, conf_top;
+	conf_left = (u16)cfg->get_u (cfg_this_, CFG_LEFT, DEFAULT_LEFT);
+	conf_top  = (u16)cfg->get_u (cfg_this_, CFG_TOP , DEFAULT_TOP );
+
+app_s *m_
+	= app_get_instance ();
+	app_set_config (m_, cfg_this_);
+	app_set_position (m_, conf_left, conf_top);
+	app_set_finally (m_, _on_exit, NULL);
+
+gsar_s gsar;
+	gsar_ctor (&gsar, sizeof(gsar), WIDTH, HEIGHT, cpu_count, opts.mag);
 
 	gtk_init (&cmdc, &cmdv);
 GtkWindow *appframe;
 	if (! (appframe = GTK_WINDOW(gtk_window_new (GTK_WINDOW_TOPLEVEL))))
 		return -1;
+	gtk_window_move (appframe, conf_left, conf_top);
 
 GtkWidget *da;
 	da = gtk_drawing_area_new ();
 ASSERTE(GTK_IS_DRAWING_AREA(da))
-	g_signal_connect (appframe, "destroy", G_CALLBACK(_on_destroy), da);
-	g_signal_connect (da, "expose_event", G_CALLBACK(_on_expose), NULL);
+	g_signal_connect (appframe, "destroy"        , G_CALLBACK(_on_destroy)  , da);
+	g_signal_connect (appframe, "configure_event", G_CALLBACK(_on_configure), da);
+	g_signal_connect (da      , "expose_event"   , G_CALLBACK(_on_expose)   , NULL);
 	gtk_widget_show (da);
 	gtk_container_add (GTK_CONTAINER(appframe), da);
 
-	_set_control (&this_, da);
+	_set_control (&gsar, da);
 	gdk_threads_add_timeout (REDRAW_INTERVAL_MS, _on_timer, (gpointer)da);
 
 	gtk_widget_show_all (GTK_WIDGET(appframe));
 	gtk_main ();
 
+	config_cleanup ();
 	return 0;
 }

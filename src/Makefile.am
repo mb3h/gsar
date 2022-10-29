@@ -4,4 +4,5 @@ bin_PROGRAMS = gsar
 AM_CPPFLAGS = -x c -std=c99 -Wno-deprecated-declarations @GTK_CFLAGS@
 gsar_LDADD = @GTK_LIBS@
 gsar_SOURCES = \
-	main.c bmp_grid.c gtk2_helper.c bmp_helper.c lock.c portab.c
+	main.c bmp_grid.c gtk2_helper.c bmp_helper.c lock.c portab.c conf.c \
+	       bmp_grid.h gtk2_helper.h bmp_helper.h lock.h portab.h conf.h
